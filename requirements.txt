@@ -1,0 +1,4 @@
+discord.py==1.7.3
+requests==2.25.1
+validators==0.18.2
+youtube_dl==2021.12.17
