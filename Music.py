@@ -43,9 +43,9 @@ class Music(commands.Cog):
         else:
             URL = info['entries'][0]['formats'][0]['url']
         if valid:
-            self.nowPlaying = [info['title'], user]
+            self.nowPlaying = [info['title'], user, image]
         else:
-            self.nowPlaying = [info['entries'][0]['title'], user]
+            self.nowPlaying = [info['entries'][0]['title'], user, image]
         try:
             voice.play(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after = lambda x = None: asyncio.run_coroutine_threadsafe(self.check_queue(ctx), self.bot.loop))
             if (valid):
@@ -75,7 +75,14 @@ class Music(commands.Cog):
 
     @commands.command()
     async def song(self, ctx):
-        await ctx.send(f"Now playing: {self.nowPlaying[0]} Requested by: {self.nowPlaying[1]}")
+        embed = discord.Embed(
+        title = f"Now playing: {self.nowPlaying[0]}",
+        description = f"Requested by: {self.nowPlaying[1]}",
+        color = discord.Color.dark_blue()
+        )
+        if (self.nowPlaying[2] != None):
+            embed.set_thumbnail(url = self.nowPlaying[2])
+        await ctx.send(embed = embed)
         
     @commands.command(aliases = ["p", "connect"])
     async def play(self, ctx, * , query):
@@ -166,7 +173,10 @@ class Music(commands.Cog):
             self.queue[ctx.guild.id] = []
         for i in range(len(data['tracks']['items'])):
             #if add new things, add them to the end of the sublist
-            self.queue[ctx.guild.id].append([data['tracks']['items'][i]['track']['name'] + " - " + data['tracks']['items'][i]['track']['artists'][0]['name'], ctx.author.name, data['tracks']['items'][i]['track']['album']['images'][0]['url']])
+            author = data['tracks']['items'][i]['track']['artists'][0]['name']
+            songname = data['tracks']['items'][i]['track']['name']
+            url = data['tracks']['items'][i]['track']['album']['images'][0]['url']
+            self.queue[ctx.guild.id].append([songname + " - " + author, ctx.author.name, url])
         try:
             vc = ctx.author.voice.channel
         except AttributeError:
@@ -189,17 +199,31 @@ class Music(commands.Cog):
 
     
     @commands.command(aliases = ['q'])
-    async def queue(self, ctx):
-        await ctx.send(f"Queue for {ctx.guild.name}")
+    async def queue(self, ctx, pageNum = None):
         try:
             if (self.queue[ctx.guild.id] == []):
                 await ctx.send("There is nothing in the queue.")
                 return
             str = ""
-            for i in self.queue[ctx.guild.id]:
-                str += "**" + i[0] + "**" + " requested by: " + i[1] + "\n"
+            pageCount = len(self.queue[ctx.guild.id]) // 10 + 1
+            if pageCount == 1:
+                for i in self.queue[ctx.guild.id]:
+                    str += "**" + i[0] + "**" + " requested by: " + i[1] + "\n"
+            else:
+                if (pageNum == None):
+                    pageNum = 1
+                else:
+                    pageNum = int(pageNum)
+                if (pageNum > pageCount or pageNum < 1):
+                    await ctx.send("Invalid page number.")
+                    return
+                for i in range(10 * (pageNum - 1), 10 * pageNum):
+                    if (i >= len(self.queue[ctx.guild.id])):
+                        break
+                    str += "**" + self.queue[ctx.guild.id][i][0] + "**" + " requested by: " + self.queue[ctx.guild.id][i][1] + "\n"
             embed = discord.Embed(title = f"Queue for {ctx.guild.name}", description = f"Now playing: **{self.nowPlaying[0]}** Requested by: {self.nowPlaying[1]}", color = discord.Color.dark_blue())
             embed.add_field(name = f"Songs in queue:", value = str)
+            embed.set_footer(text = f"Page {pageNum}/{pageCount}")
             await ctx.send(embed = embed)
         except KeyError:
             await ctx.send("There is nothing in the queue.")
