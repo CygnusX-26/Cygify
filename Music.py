@@ -43,7 +43,9 @@ class Music(commands.Cog):
         else:
             URL = info['entries'][0]['formats'][0]['url']
         if valid:
-            self.nowPlaying = info['title']
+            self.nowPlaying = [info['title'], user]
+        else:
+            self.nowPlaying = [info['entries'][0]['title'], user]
         try:
             voice.play(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after = lambda x = None: asyncio.run_coroutine_threadsafe(self.check_queue(ctx), self.bot.loop))
             if (valid):
@@ -73,7 +75,7 @@ class Music(commands.Cog):
 
     @commands.command()
     async def song(self, ctx):
-        await ctx.send(f"Now playing: {self.nowPlaying[0]}")
+        await ctx.send(f"Now playing: {self.nowPlaying[0]} Requested by: {self.nowPlaying[1]}")
         
     @commands.command(aliases = ["p", "connect"])
     async def play(self, ctx, * , query):
@@ -160,7 +162,6 @@ class Music(commands.Cog):
         'Authorization': f'Bearer {response["access_token"]}',
         }
         data = requests.get(f"https://api.spotify.com/v1/playlists/{id}", headers=headers).json()
-        pprint(data)
         if (not ctx.guild.id in self.queue):
             self.queue[ctx.guild.id] = []
         for i in range(len(data['tracks']['items'])):
@@ -196,8 +197,13 @@ class Music(commands.Cog):
                 return
             str = ""
             for i in self.queue[ctx.guild.id]:
-                await ctx.send("**" + i[0] + "**" + " requested by: " + i[1])
+                str += "**" + i[0] + "**" + " requested by: " + i[1] + "\n"
+            embed = discord.Embed(title = f"Queue for {ctx.guild.name}", description = f"Now playing: **{self.nowPlaying[0]}** Requested by: {self.nowPlaying[1]}", color = discord.Color.dark_blue())
+            embed.add_field(name = f"Songs in queue:", value = str)
+            await ctx.send(embed = embed)
         except KeyError:
             await ctx.send("There is nothing in the queue.")
+        
+
             
         
