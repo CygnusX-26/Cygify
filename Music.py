@@ -188,7 +188,7 @@ class Music(commands.Cog):
             await ctx.send("Added to queue!")
 
     
-    @commands.command()
+    @commands.command(aliases = ['q'])
     async def queue(self, ctx):
         await ctx.send(f"Queue for {ctx.guild.name}")
         try:
