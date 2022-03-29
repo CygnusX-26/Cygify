@@ -2,6 +2,7 @@ import asyncio
 import os
 import discord
 from discord.ext import commands
+from discord.errors import ClientException
 from discord.utils import get
 import youtube_dl
 import validators
@@ -14,16 +15,21 @@ from pprint import pprint
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = []
+        self.queue = {}
+        self.nowPlaying = None
     
-
     async def check_queue(self, ctx):
-        if self.queue != []:
+        if self.queue[ctx.guild.id] != []:
             voice = ctx.guild.voice_client
-            await self.play_song(ctx, voice, self.queue.pop(0))
+            user = self.queue[ctx.guild.id][0][1]
+            image = self.queue[ctx.guild.id][0][2]
+            await self.play_song(ctx, voice, self.queue[ctx.guild.id].pop(0)[0], user, image)
 
 
-    async def play_song(self, ctx, voice, query):
+    async def play_song(self, ctx, voice, query, user, image = None):
+        hasImage = True
+        if (image == None):
+            hasImage = False
         valid = validators.url(query)
         if (valid):
             YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
@@ -31,21 +37,43 @@ class Music(commands.Cog):
             YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True', 'default_search':'ytsearch'}
         with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
             info = ydl.extract_info(query, download=False)
-        if (valid):
-            await ctx.send(f"Now playing: {info['title']}")
-        else:
-            await ctx.send(f"Now playing: {info['entries'][0]['title']}")
         FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
         if (valid):
             URL = info['formats'][0]['url']
         else:
             URL = info['entries'][0]['formats'][0]['url']
-        voice.play(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after = lambda x = None: asyncio.run_coroutine_threadsafe(self.check_queue(ctx), self.bot.loop))
+        if valid:
+            self.nowPlaying = info['title']
+        try:
+            voice.play(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after = lambda x = None: asyncio.run_coroutine_threadsafe(self.check_queue(ctx), self.bot.loop))
+            if (valid):
+                # await ctx.send(f'Now playing: {info["title"]}')
+                embed = discord.Embed(
+                title = f"Now playing: {info['title']}",
+                description = f"Requested by: {user}",
+                color = discord.Color.dark_blue()
+                )
+                if (hasImage):
+                    embed.set_thumbnail(url = image)
+                await ctx.send(embed = embed)
+            else:
+                # await ctx.send(f'Now playing: {info["entries"][0]["title"]}')
+                embed = discord.Embed(
+                title = f"Now playing: {info['entries'][0]['title']}",
+                description = f"Requested by: {user}",
+                color = discord.Color.dark_blue()
+                )
+                if (hasImage):
+                    embed.set_thumbnail(url = image)
+                await ctx.send(embed = embed)
+        except ClientException:
+            await ctx.send("You are sending commands too fast!")
+        
 
 
     @commands.command()
     async def song(self, ctx):
-        await ctx.send(f"Now playing: {ctx.guild.voice_client.source.title}")
+        await ctx.send(f"Now playing: {self.nowPlaying[0]}")
         
     @commands.command(aliases = ["p", "connect"])
     async def play(self, ctx, * , query):
@@ -63,10 +91,13 @@ class Music(commands.Cog):
             voice = get(self.bot.voice_clients, guild=ctx.guild)
         
         if not voice.is_playing():
-            await self.play_song(ctx, voice, query)
+            await self.play_song(ctx, voice, query, ctx.author.name)
         else:
             await ctx.send(f"Added your song to the queue.")
-            self.queue.append(query)
+            if (not ctx.guild.id in self.queue):
+                self.queue[ctx.guild.id] = []
+
+            self.queue[ctx.guild.id].append([query, ctx.author.name, None])
             return
         
     
@@ -74,6 +105,10 @@ class Music(commands.Cog):
     async def disconnect(self, ctx):
         voice = get(self.bot.voice_clients, guild=ctx.guild)
         if voice and voice.is_connected():
+            if not ctx.guild.id in self.queue:
+                await voice.disconnect()
+                await ctx.send("Disconnected")
+            self.queue[ctx.guild.id] = []
             await voice.disconnect()
             await ctx.send("Disconnected")
         else:
@@ -101,7 +136,7 @@ class Music(commands.Cog):
     async def stop(self, ctx):
         voice = get(self.bot.voice_clients, guild=ctx.guild)
         if voice and voice.is_playing():
-            self.queue = []
+            self.queue[ctx.guild.id] = []
             voice.stop()
             await ctx.send("Stopped the queue")
         else:
@@ -116,10 +151,6 @@ class Music(commands.Cog):
         else:
             await ctx.send("I am not playing anything")
 
-
-
-
-
     @commands.command()
     async def track(self, ctx, * , query):
         access = os.getenv('SP_ID') + ":" + os.getenv('SP_SECRET')
@@ -129,8 +160,12 @@ class Music(commands.Cog):
         'Authorization': f'Bearer {response["access_token"]}',
         }
         data = requests.get(f"https://api.spotify.com/v1/playlists/{id}", headers=headers).json()
+        pprint(data)
+        if (not ctx.guild.id in self.queue):
+            self.queue[ctx.guild.id] = []
         for i in range(len(data['tracks']['items'])):
-            self.queue.append(data['tracks']['items'][i]['track']['album']['name'])
+            #if add new things, add them to the end of the sublist
+            self.queue[ctx.guild.id].append([data['tracks']['items'][i]['track']['name'] + " - " + data['tracks']['items'][i]['track']['artists'][0]['name'], ctx.author.name, data['tracks']['items'][i]['track']['album']['images'][0]['url']])
         try:
             vc = ctx.author.voice.channel
         except AttributeError:
@@ -144,11 +179,25 @@ class Music(commands.Cog):
         else:
             voice = get(self.bot.voice_clients, guild=ctx.guild)
         if (not voice.is_playing()):
-            await self.play_song(ctx, voice, self.queue.pop(0))
+            song = self.queue[ctx.guild.id].pop(0)[0]
+            name = ctx.author.name
+            url = data['tracks']['items'][0]['track']['album']['images'][0]['url']
+            await self.play_song(ctx, voice, song, name, url) # add new params here if needed in the future
+        else:
+            await ctx.send("Added to queue!")
+
     
     @commands.command()
     async def queue(self, ctx):
-        for i in self.queue:
-            await ctx.send(i)
+        await ctx.send(f"Queue for {ctx.guild.name}")
+        try:
+            if (self.queue[ctx.guild.id] == []):
+                await ctx.send("There is nothing in the queue.")
+                return
+            str = ""
+            for i in self.queue[ctx.guild.id]:
+                await ctx.send("**" + i[0] + "**" + " requested by: " + i[1])
+        except KeyError:
+            await ctx.send("There is nothing in the queue.")
             
         
