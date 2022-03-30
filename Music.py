@@ -209,6 +209,7 @@ class Music(commands.Cog):
             if pageCount == 1:
                 for i in self.queue[ctx.guild.id]:
                     str += "**" + i[0] + "**" + " requested by: " + i[1] + "\n"
+                pageNum = 1
             else:
                 if (pageNum == None):
                     pageNum = 1
